@@ -1,6 +1,5 @@
 const express = require('express');
 const cors = require('cors');
-const axios = require('axios');
 const cheerio = require('cheerio');
 
 const app = express();
@@ -11,9 +10,14 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
 // ─── Helper: Summarize text with Claude ───────────────────────────────────────
 async function summarizeWithClaude(articleText, title = '') {
-  const response = await axios.post(
-    'https://api.anthropic.com/v1/messages',
-    {
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 1000,
       system: `You are an expert article analyst. Given article content, produce a concise analysis.
@@ -30,63 +34,40 @@ Respond ONLY in this JSON format (no markdown, no backticks):
           content: `Title: ${title}\n\nArticle content:\n${articleText.slice(0, 6000)}`,
         },
       ],
-    },
-    {
-      headers: {
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-    }
-  );
+    }),
+  });
 
-  const text = response.data.content.map((b) => b.text || '').join('');
+  const data = await response.json();
+  const text = data.content.map((b) => b.text || '').join('');
   return JSON.parse(text.trim());
 }
 
 // ─── Helper: Scrape article text from a URL ───────────────────────────────────
 async function scrapeArticle(url) {
-  const { data: html } = await axios.get(url, {
-    timeout: 10000,
+  const response = await fetch(url, {
     headers: {
-      'User-Agent':
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
     },
   });
-
+  const html = await response.text();
   const $ = cheerio.load(html);
 
-  // Remove noise
-  $('script, style, nav, footer, header, aside, .ad, .ads, .advertisement, .sidebar, .menu, .cookie-banner').remove();
+  $('script, style, nav, footer, header, aside, .ad, .ads, .advertisement, .sidebar, .menu').remove();
 
-  // Try to get the title
   const title =
     $('h1').first().text().trim() ||
     $('meta[property="og:title"]').attr('content') ||
-    $('title').text().trim() ||
-    '';
+    $('title').text().trim() || '';
 
-  // Try to find the main article body
-  const selectors = [
-    'article',
-    '[role="main"]',
-    '.article-body',
-    '.post-content',
-    '.entry-content',
-    '.story-body',
-    'main',
-  ];
-
+  const selectors = ['article', '[role="main"]', '.article-body', '.post-content', '.entry-content', '.story-body', 'main'];
   let articleText = '';
   for (const sel of selectors) {
     const el = $(sel);
     if (el.length) {
       articleText = el.text().replace(/\s+/g, ' ').trim();
-      break;
+      if (articleText.length > 200) break;
     }
   }
-
-  // Fallback to body
   if (!articleText || articleText.length < 200) {
     articleText = $('body').text().replace(/\s+/g, ' ').trim();
   }
@@ -94,9 +75,10 @@ async function scrapeArticle(url) {
   return { title, text: articleText };
 }
 
-// ─── Helper: Fetch RSS feed and return article list ───────────────────────────
+// ─── Helper: Fetch RSS feed ───────────────────────────────────────────────────
 async function fetchRSS(feedUrl) {
-  const { data: xml } = await axios.get(feedUrl, { timeout: 10000 });
+  const response = await fetch(feedUrl);
+  const xml = await response.text();
   const $ = cheerio.load(xml, { xmlMode: true });
 
   const items = [];
@@ -106,42 +88,32 @@ async function fetchRSS(feedUrl) {
     const title = $el.find('title').first().text().trim();
     const pubDate = $el.find('pubDate, published, updated').first().text().trim();
     const description = $el.find('description, summary, content').first().text()
-      .replace(/<[^>]+>/g, '') // strip HTML tags
-      .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, 300);
-
-    if (link && title) {
-      items.push({ title, link, pubDate, description });
-    }
+      .replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().slice(0, 300);
+    if (link && title) items.push({ title, link, pubDate, description });
   });
 
-  return items.slice(0, 20); // return top 20
+  return items.slice(0, 20);
 }
 
 // ─── ROUTES ───────────────────────────────────────────────────────────────────
 
-// POST /summarize-url — scrape a URL and summarize it
 app.post('/summarize-url', async (req, res) => {
   const { url } = req.body;
   if (!url) return res.status(400).json({ error: 'URL is required' });
-
   try {
     const { title, text } = await scrapeArticle(url);
-    if (text.length < 100) return res.status(422).json({ error: 'Could not extract enough text from this page.' });
+    if (text.length < 100) return res.status(422).json({ error: 'Could not extract enough text.' });
     const result = await summarizeWithClaude(text, title);
     res.json({ ...result, url });
   } catch (err) {
     console.error(err.message);
-    res.status(500).json({ error: 'Failed to scrape or summarize the article.' });
+    res.status(500).json({ error: 'Failed to scrape or summarize.' });
   }
 });
 
-// POST /summarize-text — summarize pasted text
 app.post('/summarize-text', async (req, res) => {
   const { text, title } = req.body;
   if (!text) return res.status(400).json({ error: 'Text is required' });
-
   try {
     const result = await summarizeWithClaude(text, title || '');
     res.json(result);
@@ -151,11 +123,9 @@ app.post('/summarize-text', async (req, res) => {
   }
 });
 
-// POST /fetch-rss — get articles from an RSS feed
 app.post('/fetch-rss', async (req, res) => {
   const { feedUrl } = req.body;
   if (!feedUrl) return res.status(400).json({ error: 'feedUrl is required' });
-
   try {
     const articles = await fetchRSS(feedUrl);
     res.json({ articles });
@@ -165,22 +135,19 @@ app.post('/fetch-rss', async (req, res) => {
   }
 });
 
-// POST /summarize-rss-item — fetch one RSS item's URL and summarize it
 app.post('/summarize-rss-item', async (req, res) => {
   const { url, title } = req.body;
   if (!url) return res.status(400).json({ error: 'URL is required' });
-
   try {
     const { text } = await scrapeArticle(url);
     const result = await summarizeWithClaude(text, title || '');
     res.json({ ...result, url });
   } catch (err) {
     console.error(err.message);
-    res.status(500).json({ error: 'Failed to summarize this article.' });
+    res.status(500).json({ error: 'Failed to summarize.' });
   }
 });
 
-// Health check
 app.get('/health', (_, res) => res.json({ status: 'ok' }));
 
 const PORT = process.env.PORT || 3001;
