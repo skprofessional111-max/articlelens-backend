@@ -5,7 +5,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
 function stripHtml(html) {
   return html
@@ -15,13 +16,9 @@ function stripHtml(html) {
     .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
     .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '')
     .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/\s+/g, ' ')
-    .trim();
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim();
 }
 
 function extractTitle(html) {
@@ -34,29 +31,30 @@ function extractTitle(html) {
   return '';
 }
 
-async function summarizeWithClaude(articleText, title) {
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+async function summarizeWithGemini(articleText, title) {
+  const prompt = `You are an expert article analyst. Analyze this article and respond ONLY with a JSON object (no markdown, no backticks, no extra text):
+{"title":"Article title","summary":"3-5 sentence summary capturing the core message","takeaways":["emoji + takeaway","emoji + takeaway","emoji + takeaway","emoji + takeaway"]}
+
+Title: ${title}
+Content: ${articleText.slice(0, 6000)}`;
+
+  const response = await fetch(GEMINI_URL, {
     method: 'POST',
-    headers: {
-      'x-api-key': ANTHROPIC_API_KEY,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1000,
-      system: `You are an expert article analyst. Respond ONLY in this JSON format (no markdown, no backticks):
-{"title":"Article title","summary":"3-5 sentence summary","takeaways":["emoji takeaway","emoji takeaway","emoji takeaway","emoji takeaway"]}`,
-      messages: [{ role: 'user', content: `Title: ${title}\n\nContent:\n${articleText.slice(0, 6000)}` }],
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.3, maxOutputTokens: 1000 },
     }),
   });
+
   const data = await response.json();
-  if (!data.content) {
-    console.error('Claude API error:', JSON.stringify(data));
-    throw new Error(data.error?.message || 'Claude API error');
+  if (!data.candidates) {
+    console.error('Gemini API error:', JSON.stringify(data));
+    throw new Error(data.error?.message || 'Gemini API error');
   }
-  const text = data.content.map((b) => b.text || '').join('');
-  return JSON.parse(text.trim());
+  const text = data.candidates[0].content.parts[0].text.trim();
+  const clean = text.replace(/```json|```/g, '').trim();
+  return JSON.parse(clean);
 }
 
 async function scrapeArticle(url) {
@@ -72,7 +70,7 @@ app.post('/summarize-url', async (req, res) => {
   if (!url) return res.status(400).json({ error: 'URL is required' });
   try {
     const { title, text } = await scrapeArticle(url);
-    const result = await summarizeWithClaude(text, title);
+    const result = await summarizeWithGemini(text, title);
     res.json({ ...result, url });
   } catch (err) {
     console.error(err.message);
@@ -84,7 +82,7 @@ app.post('/summarize-text', async (req, res) => {
   const { text, title } = req.body;
   if (!text) return res.status(400).json({ error: 'Text is required' });
   try {
-    const result = await summarizeWithClaude(text, title || '');
+    const result = await summarizeWithGemini(text, title || '');
     res.json(result);
   } catch (err) {
     console.error(err.message);
@@ -109,6 +107,18 @@ app.post('/fetch-rss', async (req, res) => {
       if (items.length >= 20) break;
     }
     res.json({ articles: items });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/summarize-rss-item', async (req, res) => {
+  const { url, title } = req.body;
+  if (!url) return res.status(400).json({ error: 'URL is required' });
+  try {
+    const { text } = await scrapeArticle(url);
+    const result = await summarizeWithGemini(text, title || '');
+    res.json({ ...result, url });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
