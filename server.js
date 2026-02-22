@@ -38,6 +38,10 @@ Respond ONLY in this JSON format (no markdown, no backticks):
   });
 
   const data = await response.json();
+  if (!data.content) {
+    console.error('Claude API error:', JSON.stringify(data));
+    throw new Error(data.error?.message || 'Claude API returned no content');
+  }
   const text = data.content.map((b) => b.text || '').join('');
   return JSON.parse(text.trim());
 }
