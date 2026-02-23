@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="ArticleLens"/>
+  <title>ArticleLens</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+  <style>
+    :root {
+      --bg: #0a0c10;
+      --surface: #13161e;
+      --card: #1a1d28;
+      --border: #252836;
+      --gold: #d4a853;
+      --gold-soft: rgba(212,168,83,0.12);
+      --text: #ede8df;
+      --muted: #636878;
+      --green: #5d9e6e;
+      --red: #b86060;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 15px;
+      min-height: 100vh;
+      min-height: -webkit-fill-available;
+      overflow-x: hidden;
+    }
+
+    /* ── Header ── */
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(10,12,16,0.92);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 20px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .logo {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+    .logo-mark { color: var(--gold); font-size: 18px; }
+    .logo-name {
+      font-family: 'Playfair Display', serif;
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+
+    .settings-btn {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 18px;
+      width: 38px;
+      height: 38px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+    }
+    .settings-btn:active { border-color: var(--gold); color: var(--gold); }
+
+    /* ── Settings drawer ── */
+    .settings-drawer {
+      display: none;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 20px;
+      animation: slideDown 0.2s ease;
+    }
+    .settings-drawer.visible { display: block; }
+
+    .settings-drawer label {
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+      display: block;
+      margin-bottom: 8px;
+    }
+    .settings-drawer input {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      font-family: 'DM Sans', monospace;
+      font-size: 13px;
+      padding: 12px 14px;
+      outline: none;
+      margin-bottom: 10px;
+    }
+    .settings-drawer input:focus { border-color: var(--gold); }
+
+    .save-btn {
+      width: 100%;
+      background: var(--gold-soft);
+      border: 1px solid var(--gold);
+      border-radius: 10px;
+      color: var(--gold);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      padding: 12px;
+      cursor: pointer;
+    }
+
+    /* ── Main content ── */
+    main { padding: 20px; max-width: 600px; margin: 0 auto; }
+
+    /* ── Tabs ── */
+    .tabs {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 20px;
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 4px;
+    }
+    .tab {
+      flex: 1;
+      background: none;
+      border: none;
+      border-radius: 9px;
+      color: var(--muted);
+      cursor: pointer;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 12px;
+      font-weight: 500;
+      padding: 10px 4px;
+      transition: all 0.15s;
+      letter-spacing: 0.02em;
+    }
+    .tab.active {
+      background: var(--card);
+      color: var(--gold);
+    }
+
+    /* ── Input area ── */
+    .input-area { margin-bottom: 16px; }
+
+    input[type="text"], textarea {
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      color: var(--text);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 15px;
+      padding: 14px 16px;
+      outline: none;
+      transition: border-color 0.15s;
+      -webkit-appearance: none;
+    }
+    input[type="text"]:focus, textarea:focus { border-color: var(--gold); }
+    textarea { resize: none; line-height: 1.6; }
+    ::placeholder { color: var(--muted); }
+
+    /* ── Analyze button ── */
+    .analyze-btn {
+      width: 100%;
+      background: linear-gradient(135deg, #d4a853, #a07830);
+      border: none;
+      border-radius: 12px;
+      color: #0a0c10;
+      cursor: pointer;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      padding: 16px;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .analyze-btn:active { transform: scale(0.98); opacity: 0.9; }
+    .analyze-btn:disabled { background: var(--border); color: var(--muted); }
+
+    /* ── Loading ── */
+    .loading {
+      display: none;
+      text-align: center;
+      padding: 40px 0 20px;
+    }
+    .loading.visible { display: block; }
+    .spinner {
+      font-size: 28px;
+      color: var(--gold);
+      display: inline-block;
+      animation: spin 1.2s linear infinite;
+    }
+    .loading-text {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 12px;
+      letter-spacing: 0.1em;
+    }
+
+    /* ── Error ── */
+    .error-box {
+      display: none;
+      margin-top: 14px;
+      padding: 14px 16px;
+      background: rgba(184,96,96,0.08);
+      border: 1px solid rgba(184,96,96,0.25);
+      border-radius: 10px;
+      color: var(--red);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .error-box.visible { display: block; }
+
+    /* ── Result ── */
+    .result {
+      display: none;
+      margin-top: 24px;
+      animation: fadeUp 0.35s ease;
+    }
+    .result.visible { display: block; }
+
+    .result-title {
+      font-family: 'Playfair Display', serif;
+      font-size: 20px;
+      font-weight: 600;
+      line-height: 1.35;
+      color: #f5efe4;
+      margin-bottom: 16px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .section-label {
+      font-size: 10px;
+      letter-spacing: 0.14em;
+      color: var(--gold);
+      font-weight: 500;
+      margin-bottom: 10px;
+    }
+
+    .summary-box {
+      font-size: 15px;
+      line-height: 1.75;
+      color: #c8c0b0;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--gold);
+      border-radius: 0 10px 10px 0;
+      padding: 16px;
+      margin-bottom: 20px;
+    }
+
+    .takeaways {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 24px;
+    }
+
+    .takeaway {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      font-size: 14px;
+      line-height: 1.6;
+      color: #c8c0b0;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      animation: fadeUp 0.3s ease both;
+    }
+    .takeaway-emoji { flex-shrink: 0; font-size: 16px; }
+
+    /* ── History ── */
+    .history-section { margin-top: 28px; }
+    .history-label {
+      font-size: 10px;
+      letter-spacing: 0.14em;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+    .history-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+    .history-item:active { border-color: var(--gold); }
+    .history-item-title {
+      font-size: 14px;
+      color: var(--text);
+      line-height: 1.4;
+      margin-bottom: 4px;
+    }
+    .history-item-meta {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    /* ── Bottom safe area ── */
+    .bottom-spacer { height: 40px; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes fadeUp { from { opacity:0; transform: translateY(8px); } to { opacity:1; transform: none; } }
+    @keyframes slideDown { from { opacity:0; transform: translateY(-8px); } to { opacity:1; transform: none; } }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <span class="logo-mark">◈</span>
+    <span class="logo-name">ArticleLens</span>
+  </div>
+  <button class="settings-btn" id="settings-toggle">⚙</button>
+</header>
+
+<div class="settings-drawer" id="settings-drawer">
+  <label>BACKEND URL</label>
+  <input type="text" id="backend-url" placeholder="https://your-app.railway.app"/>
+  <button class="save-btn" id="save-settings">SAVE SETTINGS</button>
+</div>
+
+<main>
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab active" data-tab="url">URL</button>
+    <button class="tab" data-tab="rss">RSS Feed</button>
+    <button class="tab" data-tab="text">Paste Text</button>
+  </div>
+
+  <!-- Input areas -->
+  <div class="input-area">
+    <div id="input-url">
+      <input type="text" id="url-input" placeholder="https://example.com/article..."/>
+    </div>
+    <div id="input-rss" style="display:none">
+      <input type="text" id="rss-input" placeholder="https://feeds.bbci.co.uk/news/rss.xml"/>
+    </div>
+    <div id="input-text" style="display:none">
+      <textarea id="text-input" rows="7" placeholder="Paste the full article text here..."></textarea>
+    </div>
+  </div>
+
+  <button class="analyze-btn" id="analyze-btn">◈ SUMMARIZE</button>
+
+  <div class="loading" id="loading">
+    <div class="spinner">◈</div>
+    <div class="loading-text">ANALYZING ARTICLE…</div>
+  </div>
+
+  <div class="error-box" id="error-box"></div>
+
+  <div class="result" id="result">
+    <div class="result-title" id="result-title"></div>
+    <div class="section-label">SUMMARY</div>
+    <div class="summary-box" id="result-summary"></div>
+    <div class="section-label">KEY TAKEAWAYS</div>
+    <div class="takeaways" id="result-takeaways"></div>
+  </div>
+
+  <!-- History -->
+  <div class="history-section" id="history-section" style="display:none">
+    <div class="history-label">RECENT</div>
+    <div id="history-list"></div>
+  </div>
+
+  <div class="bottom-spacer"></div>
+</main>
+
+<script>
+  const BACKEND_URL_KEY = 'articlelens_backend_url';
+  let currentTab = 'url';
+  let history = JSON.parse(localStorage.getItem('articlelens_history') || '[]');
+
+  // ── Init ──────────────────────────────────────────────────────────────────
+  document.addEventListener('DOMContentLoaded', () => {
+    const saved = localStorage.getItem(BACKEND_URL_KEY);
+    if (saved) document.getElementById('backend-url').value = saved;
+    renderHistory();
+
+    // Settings toggle
+    document.getElementById('settings-toggle').addEventListener('click', () => {
+      document.getElementById('settings-drawer').classList.toggle('visible');
+    });
+
+    // Save settings
+    document.getElementById('save-settings').addEventListener('click', () => {
+      const url = document.getElementById('backend-url').value.trim().replace(/\/$/, '');
+      localStorage.setItem(BACKEND_URL_KEY, url);
+      document.getElementById('settings-drawer').classList.remove('visible');
+    });
+
+    // Tabs
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        currentTab = tab.dataset.tab;
+        document.getElementById('input-url').style.display = currentTab === 'url' ? 'block' : 'none';
+        document.getElementById('input-rss').style.display = currentTab === 'rss' ? 'block' : 'none';
+        document.getElementById('input-text').style.display = currentTab === 'text' ? 'block' : 'none';
+        hideResult(); hideError();
+      });
+    });
+
+    // Analyze
+    document.getElementById('analyze-btn').addEventListener('click', analyze);
+  });
+
+  // ── Analyze ───────────────────────────────────────────────────────────────
+  async function analyze() {
+    const backendUrl = localStorage.getItem(BACKEND_URL_KEY);
+    if (!backendUrl) {
+      showError('Please set your backend URL in Settings (⚙) first.');
+      return;
+    }
+
+    hideError(); hideResult();
+    setLoading(true);
+
+    try {
+      let endpoint, body;
+
+      if (currentTab === 'url') {
+        const url = document.getElementById('url-input').value.trim();
+        if (!url) throw new Error('Please enter a URL.');
+        endpoint = '/summarize-url';
+        body = { url };
+      } else if (currentTab === 'rss') {
+        const feedUrl = document.getElementById('rss-input').value.trim();
+        if (!feedUrl) throw new Error('Please enter an RSS feed URL.');
+        endpoint = '/fetch-rss';
+        body = { feedUrl };
+      } else {
+        const text = document.getElementById('text-input').value.trim();
+        if (!text) throw new Error('Please paste some article text.');
+        endpoint = '/summarize-text';
+        body = { text };
+      }
+
+      const res = await fetch(`${backendUrl}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Something went wrong.');
+
+      if (currentTab === 'rss') {
+        showRSSResult(data.articles);
+      } else {
+        showResult(data);
+        saveToHistory(data);
+      }
+    } catch (err) {
+      showError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ── Show result ───────────────────────────────────────────────────────────
+  function showResult(data) {
+    document.getElementById('result-title').textContent = data.title || 'Article Summary';
+    document.getElementById('result-summary').textContent = data.summary || '';
+
+    const container = document.getElementById('result-takeaways');
+    container.innerHTML = '';
+    let takeaways = data.takeaways || [];
+    if (!Array.isArray(takeaways)) takeaways = Object.values(takeaways);
+
+    takeaways.forEach((t, i) => {
+      const str = String(t);
+      const parts = str.split(' ');
+      const emoji = parts[0];
+      const text = parts.slice(1).join(' ');
+      const div = document.createElement('div');
+      div.className = 'takeaway';
+      div.style.animationDelay = `${i * 0.07}s`;
+      div.innerHTML = `<span class="takeaway-emoji">${emoji}</span><span>${text}</span>`;
+      container.appendChild(div);
+    });
+
+    document.getElementById('result').classList.add('visible');
+    document.getElementById('result').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function showRSSResult(articles) {
+    if (!articles || articles.length === 0) {
+      showError('No articles found in this RSS feed.');
+      return;
+    }
+    document.getElementById('result-title').textContent = `Found ${articles.length} articles`;
+    document.getElementById('result-summary').textContent = 'Tap an article below to summarize it.';
+
+    const container = document.getElementById('result-takeaways');
+    container.innerHTML = '';
+    articles.slice(0, 10).forEach(article => {
+      const div = document.createElement('div');
+      div.className = 'takeaway';
+      div.style.cursor = 'pointer';
+      div.innerHTML = `<span class="takeaway-emoji">📰</span><span>${article.title}</span>`;
+      div.addEventListener('click', async () => {
+        const backendUrl = localStorage.getItem(BACKEND_URL_KEY);
+        setLoading(true);
+        try {
+          const res = await fetch(`${backendUrl}/summarize-rss-item`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: article.link, title: article.title }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error);
+          showResult(data);
+          saveToHistory(data);
+        } catch(err) { showError(err.message); }
+        finally { setLoading(false); }
+      });
+      container.appendChild(div);
+    });
+
+    document.getElementById('result').classList.add('visible');
+  }
+
+  // ── History ───────────────────────────────────────────────────────────────
+  function saveToHistory(data) {
+    history = [{ title: data.title, summary: data.summary, takeaways: data.takeaways, time: Date.now() }, ...history].slice(0, 10);
+    localStorage.setItem('articlelens_history', JSON.stringify(history));
+    renderHistory();
+  }
+
+  function renderHistory() {
+    const section = document.getElementById('history-section');
+    const list = document.getElementById('history-list');
+    if (history.length === 0) { section.style.display = 'none'; return; }
+    section.style.display = 'block';
+    list.innerHTML = '';
+    history.forEach(item => {
+      const div = document.createElement('div');
+      div.className = 'history-item';
+      const ago = timeAgo(item.time);
+      div.innerHTML = `<div class="history-item-title">${item.title}</div><div class="history-item-meta">${ago}</div>`;
+      div.addEventListener('click', () => showResult(item));
+      list.appendChild(div);
+    });
+  }
+
+  function timeAgo(ts) {
+    const diff = Date.now() - ts;
+    if (diff < 60000) return 'just now';
+    if (diff < 3600000) return Math.floor(diff/60000) + 'm ago';
+    if (diff < 86400000) return Math.floor(diff/3600000) + 'h ago';
+    return Math.floor(diff/86400000) + 'd ago';
+  }
+
+  // ── UI helpers ────────────────────────────────────────────────────────────
+  function setLoading(on) {
+    document.getElementById('loading').classList.toggle('visible', on);
+    document.getElementById('analyze-btn').disabled = on;
+    document.getElementById('analyze-btn').textContent = on ? 'ANALYZING…' : '◈ SUMMARIZE';
+  }
+  function showError(msg) {
+    const el = document.getElementById('error-box');
+    el.textContent = msg; el.classList.add('visible');
+  }
+  function hideError() { document.getElementById('error-box').classList.remove('visible'); }
+  function hideResult() { document.getElementById('result').classList.remove('visible'); }
+</script>
+</body>
+</html>
