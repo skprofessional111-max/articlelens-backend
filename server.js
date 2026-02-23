@@ -5,8 +5,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
 function stripHtml(html) {
   return html
@@ -31,28 +30,37 @@ function extractTitle(html) {
   return '';
 }
 
-async function summarizeWithGemini(articleText, title) {
-  const prompt = `You are an expert article analyst. Analyze this article and respond ONLY with a JSON object (no markdown, no backticks, no extra text):
-{"title":"Article title","summary":"3-5 sentence summary capturing the core message","takeaways":["emoji + takeaway","emoji + takeaway","emoji + takeaway","emoji + takeaway"]}
-
-Title: ${title}
-Content: ${articleText.slice(0, 6000)}`;
-
-  const response = await fetch(GEMINI_URL, {
+async function summarizeWithGroq(articleText, title) {
+  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Authorization': `Bearer ${GROQ_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.3, maxOutputTokens: 1000 },
+      model: 'llama-3.3-70b-versatile',
+      max_tokens: 1000,
+      temperature: 0.3,
+      messages: [
+        {
+          role: 'system',
+          content: `You are an expert article analyst. Respond ONLY with a JSON object (no markdown, no backticks, no extra text):
+{"title":"Article title","summary":"3-5 sentence summary capturing the core message","takeaways":["emoji + takeaway","emoji + takeaway","emoji + takeaway","emoji + takeaway"]}`
+        },
+        {
+          role: 'user',
+          content: `Title: ${title}\n\nContent: ${articleText.slice(0, 6000)}`
+        }
+      ],
     }),
   });
 
   const data = await response.json();
-  if (!data.candidates) {
-    console.error('Gemini API error:', JSON.stringify(data));
-    throw new Error(data.error?.message || 'Gemini API error');
+  if (!data.choices) {
+    console.error('Groq API error:', JSON.stringify(data));
+    throw new Error(data.error?.message || 'Groq API error');
   }
-  const text = data.candidates[0].content.parts[0].text.trim();
+  const text = data.choices[0].message.content.trim();
   const clean = text.replace(/```json|```/g, '').trim();
   return JSON.parse(clean);
 }
@@ -70,7 +78,7 @@ app.post('/summarize-url', async (req, res) => {
   if (!url) return res.status(400).json({ error: 'URL is required' });
   try {
     const { title, text } = await scrapeArticle(url);
-    const result = await summarizeWithGemini(text, title);
+    const result = await summarizeWithGroq(text, title);
     res.json({ ...result, url });
   } catch (err) {
     console.error(err.message);
@@ -82,7 +90,7 @@ app.post('/summarize-text', async (req, res) => {
   const { text, title } = req.body;
   if (!text) return res.status(400).json({ error: 'Text is required' });
   try {
-    const result = await summarizeWithGemini(text, title || '');
+    const result = await summarizeWithGroq(text, title || '');
     res.json(result);
   } catch (err) {
     console.error(err.message);
@@ -117,7 +125,7 @@ app.post('/summarize-rss-item', async (req, res) => {
   if (!url) return res.status(400).json({ error: 'URL is required' });
   try {
     const { text } = await scrapeArticle(url);
-    const result = await summarizeWithGemini(text, title || '');
+    const result = await summarizeWithGroq(text, title || '');
     res.json({ ...result, url });
   } catch (err) {
     res.status(500).json({ error: err.message });
