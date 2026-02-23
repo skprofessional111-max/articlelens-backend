@@ -168,4 +168,12 @@ app.post('/chat', async (req, res) => {
 app.get('/health', (_, res) => res.json({ status: 'ok' }));
 
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => console.log('ArticleLens backend running on port ' + PORT));
+app.listen(PORT, () => {
+  console.log('ArticleLens backend running on port ' + PORT);
+  // Keep alive ping every 4 minutes to prevent Railway from sleeping
+  setInterval(() => {
+    fetch('http://localhost:' + PORT + '/health')
+      .then(() => console.log('Keep-alive ping sent'))
+      .catch(() => {});
+  }, 4 * 60 * 1000);
+});
