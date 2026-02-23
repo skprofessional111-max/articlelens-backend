@@ -3,10 +3,11 @@ const cors = require('cors');
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
+// ── HTML helpers ──────────────────────────────────────────────────────────────
 function stripHtml(html) {
   return html
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
@@ -17,12 +18,13 @@ function stripHtml(html) {
     .replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim();
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ').trim();
 }
 
 function extractTitle(html) {
-  const ogTitle = html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i);
-  if (ogTitle) return ogTitle[1];
+  const og = html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i);
+  if (og) return og[1];
   const h1 = html.match(/<h1[^>]*>([^<]+)<\/h1>/i);
   if (h1) return h1[1].trim();
   const title = html.match(/<title[^>]*>([^<]+)<\/title>/i);
@@ -30,43 +32,49 @@ function extractTitle(html) {
   return '';
 }
 
-async function summarizeWithGroq(articleText, title) {
+// ── Groq call ─────────────────────────────────────────────────────────────────
+async function callGroq(messages, maxTokens) {
   const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${GROQ_API_KEY}`,
+      'Authorization': 'Bearer ' + GROQ_API_KEY,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
       model: 'llama-3.3-70b-versatile',
-      max_tokens: 1000,
+      max_tokens: maxTokens || 1000,
       temperature: 0.3,
-      messages: [
-        {
-          role: 'system',
-          content: `You are an expert article analyst. Respond ONLY with a JSON object (no markdown, no backticks, no extra text):
-{"title":"Article title","summary":"3-5 sentence summary capturing the core message","takeaways":["emoji + takeaway","emoji + takeaway","emoji + takeaway","emoji + takeaway"]}`
-        },
-        {
-          role: 'user',
-          content: `Title: ${title}\n\nContent: ${articleText.slice(0, 6000)}`
-        }
-      ],
+      messages,
     }),
   });
-
   const data = await response.json();
   if (!data.choices) {
-    console.error('Groq API error:', JSON.stringify(data));
-    throw new Error(data.error?.message || 'Groq API error');
+    console.error('Groq error:', JSON.stringify(data));
+    throw new Error(data.error ? data.error.message : 'Groq API error');
   }
- const text = data.choices[0].message.content.trim();
-  const clean = text.replace(/```json|```/g, '').trim();
-  const jsonMatch = clean.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error('Could not parse AI response');
-  return JSON.parse(jsonMatch[0]);
+  return data.choices[0].message.content.trim();
 }
 
+// ── Summarize ─────────────────────────────────────────────────────────────────
+async function summarize(articleText, title) {
+  const text = await callGroq([
+    {
+      role: 'system',
+      content: 'You are an expert article analyst. You MUST respond with ONLY a valid JSON object and nothing else. No markdown, no backticks, no explanation before or after. Just the raw JSON object.',
+    },
+    {
+      role: 'user',
+      content: 'Analyze this article and return ONLY this JSON structure with no other text:\n{"title":"string","summary":"string with 4-6 sentences giving deep analytical summary with context and implications","takeaways":["emoji + takeaway 1","emoji + takeaway 2","emoji + takeaway 3","emoji + takeaway 4","emoji + takeaway 5"]}\n\nTitle: ' + title + '\n\nContent: ' + articleText.slice(0, 5000),
+    },
+  ], 1000);
+
+  // Extract JSON robustly
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('AI did not return valid JSON');
+  return JSON.parse(match[0]);
+}
+
+// ── Scrape ────────────────────────────────────────────────────────────────────
 async function scrapeArticle(url) {
   const response = await fetch(url, {
     headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120' },
@@ -75,12 +83,14 @@ async function scrapeArticle(url) {
   return { title: extractTitle(html), text: stripHtml(html) };
 }
 
+// ── Routes ────────────────────────────────────────────────────────────────────
 app.post('/summarize-url', async (req, res) => {
   const { url } = req.body;
   if (!url) return res.status(400).json({ error: 'URL is required' });
   try {
     const { title, text } = await scrapeArticle(url);
-    const result = await summarizeWithGroq(text, title);
+    if (text.length < 100) return res.status(422).json({ error: 'Could not extract enough text from this page.' });
+    const result = await summarize(text, title);
     res.json({ ...result, url });
   } catch (err) {
     console.error(err.message);
@@ -92,8 +102,21 @@ app.post('/summarize-text', async (req, res) => {
   const { text, title } = req.body;
   if (!text) return res.status(400).json({ error: 'Text is required' });
   try {
-    const result = await summarizeWithGroq(text, title || '');
+    const result = await summarize(text, title || '');
     res.json(result);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/summarize-rss-item', async (req, res) => {
+  const { url, title } = req.body;
+  if (!url) return res.status(400).json({ error: 'URL is required' });
+  try {
+    const { text } = await scrapeArticle(url);
+    const result = await summarize(text, title || '');
+    res.json({ ...result, url });
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: err.message });
@@ -110,9 +133,9 @@ app.post('/fetch-rss', async (req, res) => {
     const matches = xml.matchAll(/<item[^>]*>([\s\S]*?)<\/item>/gi);
     for (const match of matches) {
       const block = match[1];
-      const title = (block.match(/<title[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/i)||[])[1]?.trim()||'';
-      const link = (block.match(/<link[^>]*>(https?[^<]+)<\/link>/i)||[])[1]?.trim()||'';
-      const desc = stripHtml((block.match(/<description[^>]*>([\s\S]*?)<\/description>/i)||[])[1]||'').slice(0,300);
+      const title = (block.match(/<title[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/i) || [])[1]?.trim() || '';
+      const link = (block.match(/<link[^>]*>(https?[^<]+)<\/link>/i) || [])[1]?.trim() || '';
+      const desc = stripHtml((block.match(/<description[^>]*>([\s\S]*?)<\/description>/i) || [])[1] || '').slice(0, 300);
       if (title && link) items.push({ title, link, description: desc });
       if (items.length >= 20) break;
     }
@@ -122,48 +145,20 @@ app.post('/fetch-rss', async (req, res) => {
   }
 });
 
-app.post('/summarize-rss-item', async (req, res) => {
-  const { url, title } = req.body;
-  if (!url) return res.status(400).json({ error: 'URL is required' });
-  try {
-    const { text } = await scrapeArticle(url);
-    const result = await summarizeWithGroq(text, title || '');
-    res.json({ ...result, url });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-
 app.post('/chat', async (req, res) => {
   const { question, articleText, articleTitle, history } = req.body;
-  if (!question || !articleText) return res.status(400).json({ error: 'question and articleText are required' });
+  if (!question || !articleText) return res.status(400).json({ error: 'question and articleText required' });
   try {
     const messages = [
       {
         role: 'system',
-        content: `You are an expert analyst helping a user understand an article deeply. Answer questions thoroughly and insightfully. Provide context, implications, and nuance. Be analytical and helpful.
-
-Article Title: ${articleTitle || 'Unknown'}
-Article Content: ${articleText}`
+        content: 'You are an expert analyst helping a user deeply understand an article. Be thorough, analytical, and insightful. Provide context, implications, and nuance in your answers.\n\nArticle Title: ' + (articleTitle || '') + '\nArticle Content: ' + articleText.slice(0, 5000),
       },
       ...(history || []),
-      { role: 'user', content: question }
+      { role: 'user', content: question },
     ];
-
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
-        max_tokens: 800,
-        temperature: 0.5,
-        messages,
-      }),
-    });
-    const data = await response.json();
-    if (!data.choices) throw new Error(data.error?.message || 'Groq API error');
-    res.json({ answer: data.choices[0].message.content.trim() });
+    const answer = await callGroq(messages, 800);
+    res.json({ answer });
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: err.message });
@@ -173,4 +168,4 @@ Article Content: ${articleText}`
 app.get('/health', (_, res) => res.json({ status: 'ok' }));
 
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => console.log(`ArticleLens backend running on port ${PORT}`));
+app.listen(PORT, () => console.log('ArticleLens backend running on port ' + PORT));
