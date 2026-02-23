@@ -132,6 +132,42 @@ app.post('/summarize-rss-item', async (req, res) => {
   }
 });
 
+
+app.post('/chat', async (req, res) => {
+  const { question, articleText, articleTitle, history } = req.body;
+  if (!question || !articleText) return res.status(400).json({ error: 'question and articleText are required' });
+  try {
+    const messages = [
+      {
+        role: 'system',
+        content: `You are an expert analyst helping a user understand an article deeply. Answer questions thoroughly and insightfully. Provide context, implications, and nuance. Be analytical and helpful.
+
+Article Title: ${articleTitle || 'Unknown'}
+Article Content: ${articleText}`
+      },
+      ...(history || []),
+      { role: 'user', content: question }
+    ];
+
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        max_tokens: 800,
+        temperature: 0.5,
+        messages,
+      }),
+    });
+    const data = await response.json();
+    if (!data.choices) throw new Error(data.error?.message || 'Groq API error');
+    res.json({ answer: data.choices[0].message.content.trim() });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/health', (_, res) => res.json({ status: 'ok' }));
 
 const PORT = process.env.PORT || 8080;
