@@ -7,7 +7,6 @@ app.use(express.json({ limit: '10mb' }));
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
-// ── HTML helpers ──────────────────────────────────────────────────────────────
 function stripHtml(html) {
   return html
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
@@ -32,7 +31,6 @@ function extractTitle(html) {
   return '';
 }
 
-// ── Groq call ─────────────────────────────────────────────────────────────────
 async function callGroq(messages, maxTokens) {
   const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
@@ -55,7 +53,6 @@ async function callGroq(messages, maxTokens) {
   return data.choices[0].message.content.trim();
 }
 
-// ── Summarize ─────────────────────────────────────────────────────────────────
 async function summarize(articleText, title) {
   const text = await callGroq([
     {
@@ -64,17 +61,15 @@ async function summarize(articleText, title) {
     },
     {
       role: 'user',
-      content: 'Analyze this article and return ONLY this JSON structure with no other text:\n{"title":"string","summary":"string with 4-6 sentences giving deep analytical summary with context and implications","takeaways":["emoji + takeaway 1","emoji + takeaway 2","emoji + takeaway 3","emoji + takeaway 4","emoji + takeaway 5"]}\n\nTitle: ' + title + '\n\nContent: ' + articleText.slice(0, 5000),
+      content: 'Analyze this article and return ONLY this JSON structure:\n{"title":"string","summary":"4-6 sentences with deep analytical summary including context, background and implications","takeaways":["emoji + takeaway 1","emoji + takeaway 2","emoji + takeaway 3","emoji + takeaway 4","emoji + takeaway 5"]}\n\nTitle: ' + title + '\n\nContent: ' + articleText.slice(0, 5000),
     },
   ], 1000);
 
-  // Extract JSON robustly
   const match = text.match(/\{[\s\S]*\}/);
   if (!match) throw new Error('AI did not return valid JSON');
   return JSON.parse(match[0]);
 }
 
-// ── Scrape ────────────────────────────────────────────────────────────────────
 async function scrapeArticle(url) {
   const response = await fetch(url, {
     headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120' },
@@ -89,9 +84,9 @@ app.post('/summarize-url', async (req, res) => {
   if (!url) return res.status(400).json({ error: 'URL is required' });
   try {
     const { title, text } = await scrapeArticle(url);
-    if (text.length < 100) return res.status(422).json({ error: 'Could not extract enough text from this page.' });
+    if (text.length < 100) return res.status(422).json({ error: 'Could not extract enough text.' });
     const result = await summarize(text, title);
-    res.json({ ...result, url });
+    res.json({ ...result, url, fullText: text.slice(0, 6000) });
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: err.message });
@@ -103,7 +98,7 @@ app.post('/summarize-text', async (req, res) => {
   if (!text) return res.status(400).json({ error: 'Text is required' });
   try {
     const result = await summarize(text, title || '');
-    res.json(result);
+    res.json({ ...result, fullText: text.slice(0, 6000) });
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: err.message });
@@ -116,7 +111,7 @@ app.post('/summarize-rss-item', async (req, res) => {
   try {
     const { text } = await scrapeArticle(url);
     const result = await summarize(text, title || '');
-    res.json({ ...result, url });
+    res.json({ ...result, url, fullText: text.slice(0, 6000) });
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: err.message });
@@ -145,19 +140,31 @@ app.post('/fetch-rss', async (req, res) => {
   }
 });
 
+// ── Unrestricted Chat ─────────────────────────────────────────────────────────
 app.post('/chat', async (req, res) => {
   const { question, articleText, articleTitle, history } = req.body;
-  if (!question || !articleText) return res.status(400).json({ error: 'question and articleText required' });
+  if (!question) return res.status(400).json({ error: 'question is required' });
   try {
+    const systemPrompt = articleText
+      ? `You are an expert research assistant with broad knowledge across all domains. You have access to the following article for context, but you are NOT limited to it — use your full knowledge to give comprehensive, insightful answers. Go beyond the article when helpful. Be analytical, thorough, and cite relevant context from the wider world when relevant.
+
+Article Title: ${articleTitle || ''}
+Article Content: ${articleText.slice(0, 4000)}
+
+When answering:
+- First address what the article says about the topic if relevant
+- Then expand with broader context, implications, history, expert opinions
+- Give substantive, research-quality answers
+- If the question is unrelated to the article, just answer it fully from your knowledge`
+      : `You are an expert research assistant with broad knowledge across all domains. Give comprehensive, analytical, research-quality answers. Draw on history, current events, expert opinions, and global context.`;
+
     const messages = [
-      {
-        role: 'system',
-        content: 'You are an expert analyst helping a user deeply understand an article. Be thorough, analytical, and insightful. Provide context, implications, and nuance in your answers.\n\nArticle Title: ' + (articleTitle || '') + '\nArticle Content: ' + articleText.slice(0, 5000),
-      },
-      ...(history || []),
+      { role: 'system', content: systemPrompt },
+      ...(history || []).slice(-8),
       { role: 'user', content: question },
     ];
-    const answer = await callGroq(messages, 800);
+
+    const answer = await callGroq(messages, 1200);
     res.json({ answer });
   } catch (err) {
     console.error(err.message);
@@ -170,10 +177,10 @@ app.get('/health', (_, res) => res.json({ status: 'ok' }));
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
   console.log('ArticleLens backend running on port ' + PORT);
-  // Keep alive ping every 4 minutes to prevent Railway from sleeping
+  // Keep-alive ping every 4 minutes to prevent Railway from sleeping
   setInterval(() => {
     fetch('http://localhost:' + PORT + '/health')
-      .then(() => console.log('Keep-alive ping sent'))
+      .then(() => console.log('Keep-alive ping'))
       .catch(() => {});
   }, 4 * 60 * 1000);
 });
