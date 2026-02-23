@@ -60,9 +60,11 @@ async function summarizeWithGroq(articleText, title) {
     console.error('Groq API error:', JSON.stringify(data));
     throw new Error(data.error?.message || 'Groq API error');
   }
-  const text = data.choices[0].message.content.trim();
+ const text = data.choices[0].message.content.trim();
   const clean = text.replace(/```json|```/g, '').trim();
-  return JSON.parse(clean);
+  const jsonMatch = clean.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('Could not parse AI response');
+  return JSON.parse(jsonMatch[0]);
 }
 
 async function scrapeArticle(url) {
